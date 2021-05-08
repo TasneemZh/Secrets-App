@@ -26,7 +26,7 @@ NOTE: Make sure to connect to the **Robo 3T** properly in order to reach your lo
 
 3- Go to *My Apps*, and click on your app name after you create it
 
-4- Go to *Settings*/*Basic*, and copy the *App ID* and *App Secret* which appears in the first line in the settings.
+4- Go to *Settings/Basic*, and copy the *App ID* and *App Secret* which appears in the first line in the settings.
 
 5- Substitute the values in the project with yours
 
