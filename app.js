@@ -70,8 +70,8 @@ passport.deserializeUser(function(id, done) {
 
 // Google authentication strategy
 passport.use(new GoogleStrategy({
-    clientID: process.env.GOOGLE_CLIENT_ID,
-    clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+    clientID: process.env.GOOGLE_CLIENT_ID, // Substitute your google "App ID"
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET, // Substitute your google "Client Secret"
     callbackURL: "http://localhost:3000/auth/google/secrets-app"
   },
   function(accessToken, refreshToken, profile, cb) {
@@ -85,8 +85,8 @@ passport.use(new GoogleStrategy({
 
 // Facebook authentication strategy
 passport.use(new FacebookStrategy({
-    clientID: process.env.FACEBOOK_APP_ID,
-    clientSecret: process.env.FACEBOOK_APP_SECRET,
+    clientID: process.env.FACEBOOK_APP_ID, // Substitute your google "App ID"
+    clientSecret: process.env.FACEBOOK_APP_SECRET, // Substitute your facebook "App Secret"
     callbackURL: "http://localhost:3000/auth/facebook/secrets-app"
   },
   function(accessToken, refreshToken, profile, cb) {
