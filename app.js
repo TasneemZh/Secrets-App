@@ -3,20 +3,40 @@ require("dotenv").config();
 const express = require("express");
 const ejs = require("ejs");
 const mongoose = require("mongoose");
-var encrypt = require("mongoose-encryption");
+const session = require("express-session");
+const passport = require("passport");
+const passportLocalMongoose = require("passport-local-mongoose");
+const GoogleStrategy = require("passport-google-oauth20").Strategy;
+const FacebookStrategy = require("passport-facebook").Strategy;
+const findOrCreate = require("mongoose-findorcreate");
+
 const app = express();
+
+// Server code
+app.use(express.static("public"));
+app.set("view engine", "ejs");
+app.use(express.urlencoded({
+  extended: true
+}));
+
+app.use(session({
+  secret: "This is a very valuable secret.",
+  resave: false,
+  saveUninitialized: false
+}));
+
+app.use(passport.initialize());
+app.use(passport.session());
 
 // DB configuration
 mongoose.connect("mongodb://localhost/secretDB", {
   useNewUrlParser: true,
   useUnifiedTopology: true
 });
+mongoose.set("useCreateIndex", true);
+
 const db = mongoose.connection;
 
-// Security: encryption by mongoose
-db.connect({
-  encKey: process.env.ENC_KEY;
-});
 db.on("error", console.error.bind(console, "connection error:"));
 db.once("open", function() {
   console.log("The database is connected successfully!")
@@ -24,64 +44,182 @@ db.once("open", function() {
 
 // DB schema
 const secretSchema = new mongoose.Schema({
-  email: String,
-  password: String
+  username: String,
+  password: String,
+  socialId: String,
+  secret: Array
 });
 
-secretSchema.plugin(encrypt, {
-  secret: encKey,
-  encryptedFields: ["password"]
-});
+secretSchema.plugin(passportLocalMongoose);
+secretSchema.plugin(findOrCreate);
 
 // DB model
 const secretModel = mongoose.model("secrets", secretSchema);
 
-// Server code
-app.use(express.urlencoded({
-  extended: true
-}));
-app.use(express.static("public"));
-app.set("view engine", "ejs");
+passport.use(secretModel.createStrategy());
 
-// Get method
-app.get("/", function(req, res) {
-  res.render("home");
+passport.serializeUser(function(user, done) {
+  done(null, user.id);
 });
 
-app.get("/register", function(req, res) {
-  res.render("register");
+passport.deserializeUser(function(id, done) {
+  secretModel.findById(id, function(err, user) {
+    done(err, user);
+  });
+});
+
+// Google authentication strategy
+passport.use(new GoogleStrategy({
+    clientID: process.env.GOOGLE_CLIENT_ID,
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+    callbackURL: "http://localhost:3000/auth/google/secrets-app"
+  },
+  function(accessToken, refreshToken, profile, cb) {
+    secretModel.findOrCreate({
+      socialId: profile.id
+    }, function(err, user) {
+      return cb(err, user);
+    });
+  }
+));
+
+// Facebook authentication strategy
+passport.use(new FacebookStrategy({
+    clientID: process.env.FACEBOOK_APP_ID,
+    clientSecret: process.env.FACEBOOK_APP_SECRET,
+    callbackURL: "http://localhost:3000/auth/facebook/secrets-app"
+  },
+  function(accessToken, refreshToken, profile, cb) {
+    secretModel.findOrCreate({
+      socialId: profile.id
+    }, function(err, user) {
+      return cb(err, user);
+    });
+  }
+));
+
+// Google Get method
+app.get("/auth/google",
+  passport.authenticate("google", {
+    scope: ["profile"]
+  }));
+
+app.get("/auth/google/secrets-app",
+  passport.authenticate("google", {
+    failureRedirect: "/login"
+  }),
+  function(req, res) {
+    // Successful authentication, redirect home.
+    res.redirect("/secrets");
+  });
+
+// Facebook Get method
+app.get("/auth/facebook",
+  passport.authenticate("facebook", {
+    scope: ["email", "public_profile"]
+  }));
+
+app.get("/auth/facebook/secrets-app",
+  passport.authenticate("facebook", {
+    failureRedirect: "/login"
+  }),
+  function(req, res) {
+    // Successful authentication, redirect home.
+    res.redirect("/secrets");
+  });
+
+// General paths
+app.get("/", function(req, res) {
+  res.render("home");
 });
 
 app.get("/login", function(req, res) {
   res.render("login");
 });
 
-// Post method
-app.post("/register", function(req, res) {
-  const newSecret = new secretModel({
-    email: req.body.username,
-    password: req.body.password
-  });
-  newSecret.save(function(err) {
-    if (!err) {
-      console.log("New member has been added successfully!");
+app.get("/register", function(req, res) {
+  res.render("register");
+});
+
+app.get("/secrets", function(req, res) {
+  secretModel.find({
+    "secret": {
+      "$ne": ""
+    }
+  }, function(err, docs) {
+    if (err) {
+      console.log(err);
+    } else {
+      if (docs) {
+        res.render("secrets", {
+          docs: docs
+        });
+      }
     }
   });
+});
+
+app.get("/submit", function(req, res) {
+  if (req.isAuthenticated()) {
+    res.render("submit");
+  } else {
+    res.redirect("/login");
+  }
+});
+
+app.get("/logout", function(req, res) {
+  req.logout();
   res.redirect("/");
 });
 
-app.post("/login", function(req, res) {
-  secretModel.findOne({ // Decrypt the password because of 'doc'
-    email: req.body.username
-  }, function(err, doc) {
-    if (!err) {
-      if (doc) {
-        if (doc.password === req.body.password) {
-          res.render("secrets");
-        }
-      }
-    } else {
+// Post method
+app.post("/register", function(req, res) {
+  secretModel.register({
+    username: req.body.username
+  }, req.body.password, function(err, user) {
+    if (err) {
       console.log(err);
+      res.redirect("/register");
+    } else {
+      passport.authenticate("local")(req, res, function() {
+        res.redirect("/secrets");
+      });
+    }
+  });
+});
+
+app.post("/login", function(req, res) {
+  const newSecret = new secretModel({
+    username: req.body.username,
+    password: req.body.password
+  });
+
+  req.login(newSecret, function(err) {
+    if (err) {
+      console.log(err);
+      res.redirect("/login");
+    } else {
+      passport.authenticate("local")(req, res, function() {
+        res.redirect("/secrets");
+      });
+    }
+  });
+});
+
+app.post("/submit", function(req, res) {
+  secretModel.findById({
+    _id: req.user.id // When creating DB, data gets saved to req.user
+  }, function(err, doc) {
+    if (err) {
+      console.log(err);
+    } else {
+      if (doc) {
+        (doc.secret).push(req.body.secret);
+
+        doc.save(function() {
+          res.redirect("/secrets");
+        });
+      }
     }
   });
 });
